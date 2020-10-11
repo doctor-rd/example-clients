@@ -6,7 +6,7 @@
 #include <jack/jack.h>
 
 jack_port_t *input_port;
-jack_port_t *output_port;
+jack_port_t *output_port[2];
 jack_client_t *client;
 
 jack_default_audio_sample_t inbuf[64];
@@ -18,20 +18,22 @@ jack_default_audio_sample_t inbuf[64];
 int
 process (jack_nframes_t nframes, void *arg)
 {
-	jack_default_audio_sample_t *in, *out;
+	jack_default_audio_sample_t *in, *out[2];
 	in = jack_port_get_buffer (input_port, nframes);
-	out = jack_port_get_buffer (output_port, nframes);
+	for(int i=0; i<2; i++)
+		out[i] = jack_port_get_buffer (output_port[i], nframes);
 
 	for(jack_nframes_t i=0; i<nframes; i++) {
-		out[i] = .0f;
+		out[0][i] = .0f;
 		for(jack_nframes_t j=0; j<10; j++) {
 			jack_default_audio_sample_t sample;
 			if(i>=j)
 				sample = in[i-j];
 			else
 				sample = inbuf[64+i-j];
-			out[i] += .1f * sample;
+			out[0][i] += .1f * sample;
 		}
+		out[1][i] = in[i] - out[0][i];
 	}
 
 	for(jack_nframes_t j=0; j<64; j++)
@@ -96,16 +98,13 @@ main (int argc, char *argv[])
 	printf ("engine sample rate: %" PRIu32 "\n",
 		jack_get_sample_rate (client));
 
-	/* create two ports */
-
 	input_port = jack_port_register (client, "input",
 					 JACK_DEFAULT_AUDIO_TYPE,
 					 JackPortIsInput, 0);
-	output_port = jack_port_register (client, "output",
-					  JACK_DEFAULT_AUDIO_TYPE,
-					  JackPortIsOutput, 0);
+	output_port[0] = jack_port_register (client, "out_low", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+	output_port[1] = jack_port_register (client, "out_high", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
 
-	if ((input_port == NULL) || (output_port == NULL)) {
+	if ((input_port == NULL) || (output_port[0] == NULL || output_port[1] == NULL)) {
 		fprintf(stderr, "no more JACK ports available\n");
 		exit (1);
 	}
