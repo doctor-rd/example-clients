@@ -1,15 +1,24 @@
 #include <stdio.h>
+#include <string.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <math.h>
 
 #include <jack/jack.h>
 
+struct output {
+	jack_port_t *port;
+	float coeffs[64];
+	jack_nframes_t ncoeffs;
+};
+
 jack_port_t *input_port;
-jack_port_t *output_port[2];
 jack_client_t *client;
 
 jack_default_audio_sample_t inbuf[64];
+
+struct output outputs[2];
+int noutputs = 0;
 
 /**
  * The process callback for this JACK application is called in a
@@ -18,22 +27,22 @@ jack_default_audio_sample_t inbuf[64];
 int
 process (jack_nframes_t nframes, void *arg)
 {
-	jack_default_audio_sample_t *in, *out[2];
+	jack_default_audio_sample_t *in, *out;
 	in = jack_port_get_buffer (input_port, nframes);
-	for(int i=0; i<2; i++)
-		out[i] = jack_port_get_buffer (output_port[i], nframes);
+	for(int k=0; k<noutputs; k++) {
+		out = jack_port_get_buffer (outputs[k].port, nframes);
 
-	for(jack_nframes_t i=0; i<nframes; i++) {
-		out[0][i] = .0f;
-		for(jack_nframes_t j=0; j<10; j++) {
-			jack_default_audio_sample_t sample;
-			if(i>=j)
-				sample = in[i-j];
-			else
-				sample = inbuf[64+i-j];
-			out[0][i] += .1f * sample;
+		for(jack_nframes_t i=0; i<nframes; i++) {
+			out[i] = .0f;
+			for(jack_nframes_t j=0; j<outputs[k].ncoeffs; j++) {
+				jack_default_audio_sample_t sample;
+				if(i>=j)
+					sample = in[i-j];
+				else
+					sample = inbuf[64+i-j];
+				out[i] += outputs[k].coeffs[j] * sample;
+			}
 		}
-		out[1][i] = in[i] - out[0][i];
 	}
 
 	for(jack_nframes_t j=0; j<64; j++)
@@ -50,6 +59,25 @@ void
 jack_shutdown (void *arg)
 {
 	exit (1);
+}
+
+void load(char *str) {
+	const char seps[] = " ";
+	char *token;
+	char name[16];
+
+	token = strtok(str, seps);
+	sscanf(token, "%s", name);
+
+	outputs[noutputs].port = jack_port_register (client, name, JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+	token = strtok(NULL, seps);
+	outputs[noutputs].ncoeffs = 0;
+	while(token != NULL) {
+		outputs[noutputs].coeffs[outputs[noutputs].ncoeffs] = atof(token);
+		outputs[noutputs].ncoeffs++;
+		token = strtok(NULL, seps);
+	}
+	noutputs++;
 }
 
 int
@@ -101,12 +129,20 @@ main (int argc, char *argv[])
 	input_port = jack_port_register (client, "input",
 					 JACK_DEFAULT_AUDIO_TYPE,
 					 JackPortIsInput, 0);
-	output_port[0] = jack_port_register (client, "out_low", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-	output_port[1] = jack_port_register (client, "out_high", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
 
-	if ((input_port == NULL) || (output_port[0] == NULL || output_port[1] == NULL)) {
+	if (input_port == NULL) {
 		fprintf(stderr, "no more JACK ports available\n");
 		exit (1);
+	}
+
+	load(strdup("out_low -0.0028137 -0.0052045 -0.0079595 -0.0026899 0.0220916 0.0709401 0.1337142 0.1875272 0.2087891 0.1875272 0.1337142 0.0709401 0.0220916 -0.0026899 -0.0079595 -0.0052045 -0.0028137"));
+	load(strdup("out_high 0.0027881 0.0051571 0.0078869 0.0026654 -0.0218902 -0.0702935 -0.1324954 -0.1858178 0.7908436 -0.1858178 -0.1324954 -0.0702935 -0.0218902 0.0026654 0.0078869 0.0051571 0.0027881"));
+
+	for(int k=0; k<noutputs; k++) {
+		printf("%d.coeffs\t", k);
+		for(int i=0; i<outputs[k].ncoeffs; i++)
+			printf("%f ", outputs[k].coeffs[i]);
+		putchar('\n');
 	}
 
 	/* Tell the JACK server that we are ready to roll.  Our
